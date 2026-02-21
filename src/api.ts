@@ -3,6 +3,7 @@ import axios from "axios";
 import { Resend } from "resend";
 import dotenv from "dotenv";
 import { createRequire } from 'module';
+import { sql } from "@vercel/postgres";
 
 dotenv.config();
 
@@ -10,41 +11,113 @@ const require = createRequire(import.meta.url);
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Initialize Database
-let db: any;
-try {
-  // Use require for better-sqlite3 to avoid top-level import issues in Vercel serverless
-  // const Database = require("better-sqlite3");
-  
-  // Only try to initialize DB if not in Vercel environment or if we want to try anyway
-  // In Vercel serverless, writing to files is not supported in the function directory
-  // We wrap this in a try-catch to ensure the API doesn't crash
-  /*
-  db = new Database("asthmaguard.db", { verbose: console.log });
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS subscriptions (
-      email TEXT PRIMARY KEY,
-      auto_notify INTEGER DEFAULT 1,
-      last_notified_at DATETIME,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  */
-  throw new Error("Skipping SQLite for Vercel deployment");
-} catch (err) {
-  console.warn("Database initialization failed (running in serverless/read-only mode). Subscriptions will not persist.", err);
-  // Create a mock db object to prevent crashes
-  db = {
-    prepare: () => ({
-      get: () => null,
-      run: () => {},
-      all: () => []
-    }),
-    exec: () => {}
-  };
+// --- Database Abstraction Layer ---
+
+// 1. Initialize DB (Create table if not exists)
+async function initDB() {
+  // If running on Vercel with Postgres
+  if (process.env.POSTGRES_URL) {
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS subscriptions (
+          email VARCHAR(255) PRIMARY KEY,
+          auto_notify BOOLEAN DEFAULT TRUE,
+          last_notified_at TIMESTAMP,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+      `;
+      console.log("Vercel Postgres connected");
+    } catch (err) {
+      console.error("Vercel Postgres init failed:", err);
+    }
+    return;
+  }
+
+  // Fallback: Local SQLite
+  try {
+    const Database = require("better-sqlite3");
+    const db = new Database("asthmaguard.db");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        email TEXT PRIMARY KEY,
+        auto_notify INTEGER DEFAULT 1,
+        last_notified_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log("Local SQLite connected");
+    return db;
+  } catch (err) {
+    console.warn("SQLite not available (likely Vercel environment without Postgres). Using Mock DB.");
+    return null;
+  }
 }
 
+// Global DB instance (for SQLite only)
+let localDb: any = null;
+initDB().then(db => { localDb = db; });
+
+// 2. Helper Functions
+async function getSubscription(email: string) {
+  if (process.env.POSTGRES_URL) {
+    try {
+      const { rows } = await sql`SELECT * FROM subscriptions WHERE email = ${email}`;
+      return rows[0] ? { ...rows[0], auto_notify: rows[0].auto_notify } : null;
+    } catch (err) {
+      console.error("Postgres read error:", err);
+      return null;
+    }
+  }
+  
+  if (localDb) {
+    const row = localDb.prepare("SELECT * FROM subscriptions WHERE email = ?").get(email);
+    return row;
+  }
+  
+  return null; // Mock
+}
+
+async function upsertSubscription(email: string, autoNotify: boolean) {
+  if (process.env.POSTGRES_URL) {
+    try {
+      // Postgres upsert
+      await sql`
+        INSERT INTO subscriptions (email, auto_notify) 
+        VALUES (${email}, ${autoNotify}) 
+        ON CONFLICT (email) 
+        DO UPDATE SET auto_notify = ${autoNotify};
+      `;
+    } catch (err) {
+      console.error("Postgres write error:", err);
+    }
+    return;
+  }
+
+  if (localDb) {
+    const upsert = localDb.prepare(`
+      INSERT INTO subscriptions (email, auto_notify) 
+      VALUES (?, ?) 
+      ON CONFLICT(email) DO UPDATE SET auto_notify = excluded.auto_notify
+    `);
+    upsert.run(email, autoNotify ? 1 : 0);
+  }
+}
+
+async function deleteSubscription(email: string) {
+  if (process.env.POSTGRES_URL) {
+    await sql`DELETE FROM subscriptions WHERE email = ${email}`;
+    return;
+  }
+  
+  if (localDb) {
+    localDb.prepare("DELETE FROM subscriptions WHERE email = ?").run(email);
+  }
+}
+
+// --- End Database Abstraction ---
+
 const api = express.Router();
+
 
 // Weather by coordinates
 api.get("/weather", async (req, res) => {
@@ -133,20 +206,20 @@ api.get("/weather/search", async (req, res) => {
 });
 
 // Subscription Management
-api.get("/subscription/:email", (req, res) => {
+api.get("/subscription/:email", async (req, res) => {
   const { email } = req.params;
   try {
-    const row = db.prepare("SELECT * FROM subscriptions WHERE email = ?").get(email) as any;
+    const row = await getSubscription(email);
     res.json({ subscribed: !!row, autoNotify: row ? !!row.auto_notify : false });
   } catch (err) {
     res.json({ subscribed: false, autoNotify: false, error: "Database unavailable" });
   }
 });
 
-api.post("/unsubscribe", (req, res) => {
+api.post("/unsubscribe", async (req, res) => {
   const { email } = req.body;
   try {
-    db.prepare("DELETE FROM subscriptions WHERE email = ?").run(email);
+    await deleteSubscription(email);
     res.json({ success: true, message: "Unsubscribed successfully" });
   } catch (err: any) {
     res.status(500).json({ error: "Database error" });
@@ -164,12 +237,7 @@ api.post("/notify", async (req, res) => {
   // Save/Update subscription if requested
   if (saveEmail) {
     try {
-      const upsert = db.prepare(`
-        INSERT INTO subscriptions (email, auto_notify) 
-        VALUES (?, ?) 
-        ON CONFLICT(email) DO UPDATE SET auto_notify = excluded.auto_notify
-      `);
-      upsert.run(toEmail, autoNotify ? 1 : 0);
+      await upsertSubscription(toEmail, autoNotify);
     } catch (err) {
       console.error("Failed to save subscription:", err);
     }
