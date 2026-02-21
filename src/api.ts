@@ -3,22 +3,14 @@ import axios from "axios";
 import { Resend } from "resend";
 import Database from "better-sqlite3";
 import dotenv from "dotenv";
-import path from "path";
 
 dotenv.config();
-
-const app = express();
-app.use(express.json());
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Initialize Database
 let db: any;
 try {
-  // Only try to initialize DB if not in Vercel environment or if we want to try anyway
-  // In Vercel serverless, writing to files is not supported in the function directory
-  // We wrap this in a try-catch to ensure the API doesn't crash
   db = new Database("asthmaguard.db", { verbose: console.log });
   db.exec(`
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -30,7 +22,6 @@ try {
   `);
 } catch (err) {
   console.warn("Database initialization failed (running in serverless/read-only mode). Subscriptions will not persist.", err);
-  // Create a mock db object to prevent crashes
   db = {
     prepare: () => ({
       get: () => null,
@@ -41,7 +32,6 @@ try {
   };
 }
 
-// --- API Routes ---
 const api = express.Router();
 
 // Weather by coordinates

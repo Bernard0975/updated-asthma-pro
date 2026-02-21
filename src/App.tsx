@@ -112,20 +112,10 @@ export default function App() {
     try {
       setLoading(true);
       const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
-      
       if (!response.ok) {
-        let errorMessage;
-        try {
-          // Try to parse as JSON first
-          const errorData = await response.json();
-          errorMessage = errorData.error;
-        } catch (e) {
-          // If JSON parsing fails (e.g. Vercel error page), fall back to text
-          errorMessage = `Server Error: ${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorMessage || "Failed to fetch weather data");
+        const errorMessage = await getErrorMessage(response, "Failed to fetch weather data");
+        throw new Error(errorMessage);
       }
-      
       const result = await response.json();
       setData(result);
       setError(null);
@@ -165,8 +155,8 @@ export default function App() {
       setLoading(true);
       const response = await fetch(`/api/weather/search?q=${encodeURIComponent(searchQuery)}`);
       if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.error || "City not found");
+        const errorMessage = await getErrorMessage(response, "City not found");
+        throw new Error(errorMessage);
       }
       const result = await response.json();
       setData(result);
@@ -183,6 +173,10 @@ export default function App() {
     if (!emailAddr.includes("@")) return;
     try {
       const response = await fetch(`/api/subscription/${encodeURIComponent(emailAddr)}`);
+      if (!response.ok) {
+        const errorMessage = await getErrorMessage(response, "Failed to check subscription");
+        throw new Error(errorMessage);
+      }
       const result = await response.json();
       setIsSubscribed(result.subscribed);
       setAutoNotify(result.autoNotify);
@@ -256,6 +250,15 @@ export default function App() {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr);
   };
 
+  const getErrorMessage = async (response: Response, fallback: string) => {
+    try {
+      const errorData = await response.json();
+      return errorData?.error || fallback;
+    } catch {
+      return `${fallback} (${response.status} ${response.statusText})`;
+    }
+  };
+
   const handleNotify = async () => {
     if (!email || !validateEmail(email)) {
       setShowNotification({ show: true, msg: "Please enter a valid email address.", type: 'error' });
@@ -282,8 +285,8 @@ export default function App() {
         body: JSON.stringify({ toEmail: email, subject, message, saveEmail: true, autoNotify })
       });
 
-      const result = await response.json();
       if (response.ok) {
+        const result = await response.json();
         setShowNotification({ 
           show: true, 
           msg: result.simulated ? "Alert simulated (Check server logs)" : "Alert sent successfully!",
@@ -293,7 +296,8 @@ export default function App() {
         setIsSubscribed(true);
         setTimeout(() => setShowNotification(null), 5000);
       } else {
-        throw new Error(result.error || "Failed to send alert");
+        const errorMessage = await getErrorMessage(response, "Failed to send alert");
+        throw new Error(errorMessage);
       }
     } catch (err: any) {
       setShowNotification({ show: true, msg: err.message, type: 'error' });
@@ -314,6 +318,10 @@ export default function App() {
       if (response.ok) {
         setIsSubscribed(false);
         setShowNotification({ show: true, msg: "You have been unsubscribed.", type: 'success' });
+        setTimeout(() => setShowNotification(null), 5000);
+      } else {
+        const errorMessage = await getErrorMessage(response, "Failed to unsubscribe");
+        setShowNotification({ show: true, msg: errorMessage, type: 'error' });
         setTimeout(() => setShowNotification(null), 5000);
       }
     } catch (err) {
