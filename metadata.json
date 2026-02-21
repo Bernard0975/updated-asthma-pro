@@ -1,0 +1,5 @@
+{
+  "name": "AsthmaGuard",
+  "description": "Environmental trigger alert system with real-time weather monitoring and email notifications.",
+  "requestFramePermissions": ["geolocation"]
+}
