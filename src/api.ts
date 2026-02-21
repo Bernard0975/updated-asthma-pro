@@ -14,11 +14,12 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 let db: any;
 try {
   // Use require for better-sqlite3 to avoid top-level import issues in Vercel serverless
-  const Database = require("better-sqlite3");
+  // const Database = require("better-sqlite3");
   
   // Only try to initialize DB if not in Vercel environment or if we want to try anyway
   // In Vercel serverless, writing to files is not supported in the function directory
   // We wrap this in a try-catch to ensure the API doesn't crash
+  /*
   db = new Database("asthmaguard.db", { verbose: console.log });
   db.exec(`
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -28,6 +29,8 @@ try {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  */
+  throw new Error("Skipping SQLite for Vercel deployment");
 } catch (err) {
   console.warn("Database initialization failed (running in serverless/read-only mode). Subscriptions will not persist.", err);
   // Create a mock db object to prevent crashes
