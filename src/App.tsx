@@ -112,10 +112,20 @@ export default function App() {
     try {
       setLoading(true);
       const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+      
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to fetch weather data");
+        let errorMessage;
+        try {
+          // Try to parse as JSON first
+          const errorData = await response.json();
+          errorMessage = errorData.error;
+        } catch (e) {
+          // If JSON parsing fails (e.g. Vercel error page), fall back to text
+          errorMessage = `Server Error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage || "Failed to fetch weather data");
       }
+      
       const result = await response.json();
       setData(result);
       setError(null);

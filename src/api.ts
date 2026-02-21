@@ -16,7 +16,10 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Initialize Database
 let db: any;
 try {
-  db = new Database("asthmaguard.db");
+  // Only try to initialize DB if not in Vercel environment or if we want to try anyway
+  // In Vercel serverless, writing to files is not supported in the function directory
+  // We wrap this in a try-catch to ensure the API doesn't crash
+  db = new Database("asthmaguard.db", { verbose: console.log });
   db.exec(`
     CREATE TABLE IF NOT EXISTS subscriptions (
       email TEXT PRIMARY KEY,
@@ -26,8 +29,8 @@ try {
     )
   `);
 } catch (err) {
-  console.warn("Database initialization failed (likely due to read-only environment). Subscriptions will not work.", err);
-  // Create a mock db object to prevent crashes on read, but writes will fail or do nothing
+  console.warn("Database initialization failed (running in serverless/read-only mode). Subscriptions will not persist.", err);
+  // Create a mock db object to prevent crashes
   db = {
     prepare: () => ({
       get: () => null,
