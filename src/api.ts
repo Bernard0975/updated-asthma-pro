@@ -2,12 +2,10 @@ import express from "express";
 import axios from "axios";
 import { Resend } from "resend";
 import dotenv from "dotenv";
-import { createRequire } from 'module';
 import { sql } from "@vercel/postgres";
 
 dotenv.config();
 
-const require = createRequire(import.meta.url);
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -35,7 +33,8 @@ async function initDB() {
 
   // Fallback: Local SQLite
   try {
-    const Database = require("better-sqlite3");
+    const sqlite = await import("better-sqlite3");
+    const Database: any = (sqlite as any).default ?? sqlite;
     const db = new Database("asthmaguard.db");
     db.exec(`
       CREATE TABLE IF NOT EXISTS subscriptions (
@@ -55,7 +54,14 @@ async function initDB() {
 
 // Global DB instance (for SQLite only)
 let localDb: any = null;
-initDB().then(db => { localDb = db; });
+initDB()
+  .then((db) => {
+    localDb = db;
+  })
+  .catch((err) => {
+    console.error("DB init failed:", err);
+    localDb = null;
+  });
 
 // 2. Helper Functions
 async function getSubscription(email: string) {
