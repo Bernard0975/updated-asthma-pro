@@ -5,7 +5,9 @@ const app = express();
 
 app.use(express.json());
 
-// Mount the API router at /api so it matches the paths like /api/weather
+// Primary mount for normal /api/* requests.
 app.use('/api', api);
+// Fallback mount for platforms that forward a stripped URL path.
+app.use(api);
 
 export default app;
